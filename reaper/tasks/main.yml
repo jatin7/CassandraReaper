@@ -1,0 +1,75 @@
+---
+# tasks file for reaper
+- name: Ensure repo for reaper is present
+  yum_repository:
+    name: bintray-thelastpickle-reaper-rpm
+    description: bintray-thelastpickle-reaper-rpm
+    baseurl: https://dl.bintray.com/thelastpickle/reaper-rpm
+    enabled: yes
+    gpgcheck: no
+  register: yum_repo
+
+- name: Ensure epel is available
+  yum:
+    name: epel-release
+    state: present
+  register: epel
+
+- name: Clear yum cache
+  shell: yum clean all
+  when: yum_repo.changed == True or epel.changed == True
+
+- name: Add Cassandra Repository
+  yum_repository:
+    name: Cassandra
+    description: Cassandra
+    baseurl: "{{ cassandra_yum_repo_url }}"
+    gpgcheck: 1
+    gpgkey: "{{ cassandra_yum_repo_gpgkey_url }}"
+    state: present
+
+- name: Install additional packages
+  yum:
+    name: "{{ additional_packages }}"
+    state: present
+
+- name: Install Cassandra & Tools
+  yum:
+    name: "{{ cassandra_packages }}"
+    state: present
+
+- name: Remove commented out authenticator var in cassandra.yaml
+  lineinfile:
+    path: "/etc/cassandra/conf/cassandra.yaml"
+    regexp: "^#authenticator: \"PasswordAuthenticator\""
+    line: "authenticator: PasswordAuthenticator"
+
+- name: Remove commented out auth vars in cassandra.yaml
+  lineinfile:
+    path: "/etc/cassandra/conf/cassandra.yaml"
+    regexp: "^#authorizer: \"CassandraAuthorizer\""
+    line: "authorizer: CassandraAuthorizer"
+  register: cassandra_auth_enabled
+
+- name: Restart cassandra service
+  service:
+    name: "cassandra"
+    state: "restarted"
+    enabled: "yes"
+  when: cassandra_auth_enabled.changed == True
+
+- name: Ensure C* is active
+  wait_for:
+    port: 9042
+    host: "{{ ansible_hostname }}"
+
+- name: Create cql file to create C* admin user
+  template:
+    src: create_admin_user.cql.j2
+    dest: /home/vagrant/create_admin_user.cql
+  when: cassandra_auth_enabled.changed == True
+
+- name: Run admin user script
+  shell: cqlsh -u {{ cassandra_admin_user }} -p '{{ cassandra_admin_user_pwd }}' -f /home/vagrant/create_admin_user.cql && rm /home/vagrant/create_admin_user.cql
+  args:
+    removes: /home/vagrant/create_admin_user.cql

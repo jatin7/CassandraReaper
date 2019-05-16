@@ -1,0 +1,2 @@
+CREATE ROLE {{ cassandra_admin_user }} WITH PASSWORD = '{{ cassandra_admin_user_pwd }}' AND SUPERUSER = true AND LOGIN = true;
+ALTER ROLE cassandra WITH PASSWORD = '{{ cassandra_default_user_pwd }}' AND SUPERUSER=false;

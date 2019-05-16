@@ -1,0 +1,9 @@
+---
+# defaults file for reaper
+  cassandra_yum_repo_url: "https://www.apache.org/dist/cassandra/redhat/311x/"
+  cassandra_yum_repo_gpgkey_url: "https://www.apache.org/dist/cassandra/KEYS"
+  cassandra_packages: [ "cassandra", "cassandra-tools", "python2-cassandra-driver"]
+  additional_packages: ["jemalloc", "net-tools", "bind-utils"]
+  cassandra_admin_user: "admin"
+  cassandra_admin_user_pwd: "BigSecret"
+  cassandra_default_user_pwd: 'SomeRandomtextBlahBlah'
