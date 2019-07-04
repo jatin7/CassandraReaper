@@ -47,9 +47,7 @@
     - { "regexp": "^authenticator:*", "line": "authenticator: PasswordAuthenticator" }
     - { "regexp": "^authorizer:*", "line": "authorizer: CassandraAuthorizer" }
     - { "regexp": "^cluster_name:*", "line": "cluster_name: Reaper" }
-    - { "regexp": "^cluster_name:*", "line": "cluster_name: Reaper" }
-    - { "regexp": "^listen_iddress:*", "line": "listen_address: {{ ansible_eth1.ipv4.address }}" }
-    - { "regexp": "^listen_iddress:*", "line": "listen_address: {{ ansible_eth1.ipv4.address }}" }
+    - { "regexp": "^listen_address:*", "line": "listen_address: {{ ansible_eth1.ipv4.address }}" }
     - { "regexp": "^rpc_address:*", "line": "rpc_address: {{ ansible_eth1.ipv4.address }}" }
     - { "regexp": "^          - seeds: *", "line": "          - seeds: '192.168.43.201,192.168.43.202'" }
   register: config_change
@@ -83,3 +81,94 @@
     creates: /home/vagrant/cass_user.success
   environment:
     CQLSH_HOST: "{{ ansible_eth1.ipv4.address }}"
+
+- name: Secure default cassandra user
+  template:
+    src: secure_default_cassandra_user.cql.j2
+    dest: /home/vagrant/secure_default_cassandra_user.cql
+  when: cass_user.stat.exists == False
+
+- name: Run admin user script
+  shell: cqlsh -u {{ cassandra_admin_user }} -p {{ cassandra_admin_user_pwd }} -f /home/vagrant/secure_default_cassandra_user.cql && rm /home/vagrant/secure_default_cassandra_user.cql && touch /home/vagrant/cass_user_secured.success
+  args:
+    creates: /home/vagrant/cass_user_secured.success
+  environment:
+    CQLSH_HOST: "{{ ansible_eth1.ipv4.address }}"
+  run_once: yes
+
+- name: Test that default cassandra user has been secured
+  shell: cqlsh -u cassandra -p cassandra --execute "DESC KEYSPACES"
+  register: cqlsh_output
+  environment:
+    CQLSH_HOST: "{{ ansible_eth1.ipv4.address }}"
+  ignore_errors: yes
+  run_once: yes
+
+- assert:
+    that:
+      - "'Failed to authenticate' in cqlsh_output.stderr"
+
+- stat:
+    path: /home/vagrant/cass_reaper.success
+    get_checksum: no
+  register: cass_reaper
+
+- name: Template reaper user script to host
+  template:
+    src: create_reaper_user.cql.j2
+    dest: /home/vagrant/create_reaper_user.cql
+  when: cass_reaper.stat.exists == False
+
+- name: Run reaper user script
+  shell: cqlsh -u {{ cassandra_admin_user }} -p {{ cassandra_admin_user_pwd }} -f /home/vagrant/create_reaper_user.cql && rm /home/vagrant/create_reaper_user.cql && touch /home/vagrant/cass_reaper.success
+  args:
+    creates: /home/vagrant/cass_reaper.success
+  environment:
+    CQLSH_HOST: "{{ ansible_eth1.ipv4.address }}"
+  run_once: yes
+
+- name: Ensure reaper keyspace exists
+  cassandra_keyspace:
+    login_user: "{{ cassandra_admin_user }}"
+    login_password: "{{ cassandra_admin_user_pwd }}"
+    login_host: "{{ ansible_eth1.ipv4.address }}"
+    name: reaper_db
+    state: present
+    data_centres:
+      olten: 2
+      herdern: 2
+  run_once: yes
+
+- name: Ensure Reaper repo is available
+  yum_repository:
+    name: bintray-thelastpickle-reaper-rpm
+    description: bintray-thelastpickle-reaper-rpm
+    baseurl: https://dl.bintray.com/thelastpickle/reaper-rpm
+    gpgcheck: no
+    repo_gpgcheck: no
+    enabled: yes
+
+- name: Ensure reaper is installed
+  yum:
+    name: reaper
+    state: installed
+
+- name:
+  lineinfile:
+    path: /etc/cassandra-reaper/cassandra-reaper.yaml
+    line: "storageType: memory"
+    state: absent
+
+- name:
+  blockinfile:
+    path: /etc/cassandra-reaper/cassandra-reaper.yaml
+    block: |
+      storageType: cassandra
+      cassandra:
+        clusterName: "Reaper"
+        contactPoints: ["{{ ansible_eth1.ipv4.address }}"]
+        keyspace: reaper_db
+      authProvider:
+        type: plainText
+        username: {{ cassandra_reaper_user }}
+        password: {{ cassandra_reaper_user_pwd }}
