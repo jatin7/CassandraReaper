@@ -9,6 +9,7 @@ Vagrant.configure("2") do |config|
       reaper_node.vm.provider :virtualbox do |vbox|
         vbox.linked_clone = true
         vbox.name = node_name
+        vbox.memory = 3096
       end
       if reap == REAPER_NODES
           reaper_node.vm.provision :ansible do |ansible|

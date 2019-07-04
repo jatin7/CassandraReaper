@@ -38,38 +38,48 @@
     name: "{{ cassandra_packages }}"
     state: present
 
-- name: Remove commented out authenticator var in cassandra.yaml
+- name: Set  authenticator in cassandra.yaml
   lineinfile:
     path: "/etc/cassandra/conf/cassandra.yaml"
-    regexp: "^#authenticator: \"PasswordAuthenticator\""
-    line: "authenticator: PasswordAuthenticator"
-
-- name: Remove commented out auth vars in cassandra.yaml
-  lineinfile:
-    path: "/etc/cassandra/conf/cassandra.yaml"
-    regexp: "^#authorizer: \"CassandraAuthorizer\""
-    line: "authorizer: CassandraAuthorizer"
-  register: cassandra_auth_enabled
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  with_items:
+    - { "regexp": "^authenticator:*", "line": "authenticator: PasswordAuthenticator" }
+    - { "regexp": "^authorizer:*", "line": "authorizer: CassandraAuthorizer" }
+    - { "regexp": "^cluster_name:*", "line": "cluster_name: Reaper" }
+    - { "regexp": "^cluster_name:*", "line": "cluster_name: Reaper" }
+    - { "regexp": "^listen_iddress:*", "line": "listen_address: {{ ansible_eth1.ipv4.address }}" }
+    - { "regexp": "^listen_iddress:*", "line": "listen_address: {{ ansible_eth1.ipv4.address }}" }
+    - { "regexp": "^rpc_address:*", "line": "rpc_address: {{ ansible_eth1.ipv4.address }}" }
+    - { "regexp": "^          - seeds: *", "line": "          - seeds: '192.168.43.201,192.168.43.202'" }
+  register: config_change
 
 - name: Restart cassandra service
   service:
     name: "cassandra"
     state: "restarted"
     enabled: "yes"
-  when: cassandra_auth_enabled.changed == True
+  when: config_change.changed == True
 
 - name: Ensure C* is active
   wait_for:
     port: 9042
-    host: "{{ ansible_hostname }}"
+    host: "{{ ansible_eth1.ipv4.address }}"
+
+- stat:
+    path: /home/vagrant/cass_user.success
+    get_checksum: no
+  register: cass_user
 
 - name: Create cql file to create C* admin user
   template:
     src: create_admin_user.cql.j2
     dest: /home/vagrant/create_admin_user.cql
-  when: cassandra_auth_enabled.changed == True
+  when: cass_user.stat.exists == False
 
 - name: Run admin user script
-  shell: cqlsh -u {{ cassandra_admin_user }} -p '{{ cassandra_admin_user_pwd }}' -f /home/vagrant/create_admin_user.cql && rm /home/vagrant/create_admin_user.cql
+  shell: cqlsh -u cassandra -p cassandra -f /home/vagrant/create_admin_user.cql && rm /home/vagrant/create_admin_user.cql && touch /home/vagrant/cass_user.success
   args:
-    removes: /home/vagrant/create_admin_user.cql
+    creates: /home/vagrant/cass_user.success
+  environment:
+    CQLSH_HOST: "{{ ansible_eth1.ipv4.address }}"
