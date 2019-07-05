@@ -1,3 +1,4 @@
 CREATE ROLE IF NOT EXISTS {{ cassandra_reaper_user }} WITH PASSWORD = '{{ cassandra_reaper_user_pwd }}' AND LOGIN = true;
 GRANT SELECT ON KEYSPACE reaper_db TO {{ cassandra_reaper_user }};
 GRANT MODIFY ON KEYSPACE reaper_db TO {{ cassandra_reaper_user }};
+GRANT CREATE ON KEYSPACE reaper_db TO {{ cassandra_reaper_user }};

@@ -6,6 +6,7 @@ Vagrant.configure("2") do |config|
       reaper_node.vm.box = "centos/7"
       reaper_node.vm.network "private_network", ip: "192.168.43.#{200 + reap}"
       reaper_node.vm.hostname = node_name
+      reaper_node.vm.network "forwarded_port", guest: "#{8080 + reap}", host: "#{8080 + reap}"
       reaper_node.vm.provider :virtualbox do |vbox|
         vbox.linked_clone = true
         vbox.name = node_name

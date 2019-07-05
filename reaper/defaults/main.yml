@@ -7,5 +7,5 @@
   cassandra_admin_user: "admin"
   cassandra_admin_user_pwd: "BigSecret"
   cassandra_default_user_pwd: 'SomeRandomtextBlahBlah'
-  cassandra_reaper_user: "XXXXXXX"
-  cassandra_reaper_user_pwd: "XXXXXXX"
+  cassandra_reaper_user: reaper
+  cassandra_reaper_user_pwd: BigSecretPassword

@@ -119,14 +119,6 @@
     dest: /home/vagrant/create_reaper_user.cql
   when: cass_reaper.stat.exists == False
 
-- name: Run reaper user script
-  shell: cqlsh -u {{ cassandra_admin_user }} -p {{ cassandra_admin_user_pwd }} -f /home/vagrant/create_reaper_user.cql && rm /home/vagrant/create_reaper_user.cql && touch /home/vagrant/cass_reaper.success
-  args:
-    creates: /home/vagrant/cass_reaper.success
-  environment:
-    CQLSH_HOST: "{{ ansible_eth1.ipv4.address }}"
-  run_once: yes
-
 - name: Ensure reaper keyspace exists
   cassandra_keyspace:
     login_user: "{{ cassandra_admin_user }}"
@@ -135,8 +127,15 @@
     name: reaper_db
     state: present
     data_centres:
-      olten: 2
-      herdern: 2
+      datacenter1: 2
+  run_once: yes
+
+- name: Run reaper user script
+  shell: cqlsh -u {{ cassandra_admin_user }} -p {{ cassandra_admin_user_pwd }} -f /home/vagrant/create_reaper_user.cql && rm /home/vagrant/create_reaper_user.cql && touch /home/vagrant/cass_reaper.success
+  args:
+    creates: /home/vagrant/cass_reaper.success
+  environment:
+    CQLSH_HOST: "{{ ansible_eth1.ipv4.address }}"
   run_once: yes
 
 - name: Ensure Reaper repo is available
@@ -168,7 +167,16 @@
         clusterName: "Reaper"
         contactPoints: ["{{ ansible_eth1.ipv4.address }}"]
         keyspace: reaper_db
-      authProvider:
-        type: plainText
-        username: {{ cassandra_reaper_user }}
-        password: {{ cassandra_reaper_user_pwd }}
+        queryOptions:
+          consistencyLevel: LOCAL_ONE
+          serialConsistencyLevel: SERIAL
+        authProvider:
+          type: plainText
+          username: {{ cassandra_reaper_user }}
+          password: {{ cassandra_reaper_user_pwd }}
+
+- name: Ensure cassandra-reaper is configured and running
+  service:
+    name: cassandra-reaper
+    state: started
+    enabled: yes
