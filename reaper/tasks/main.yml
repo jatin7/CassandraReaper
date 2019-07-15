@@ -1,5 +1,15 @@
 ---
 # tasks file for reaper
+- name: Install ntp
+  yum:
+    name: ntp
+
+- name: Ensure ntp is started
+  service:
+    name: ntpd
+    state: started
+    enabled: yes
+
 - name: Ensure repo for reaper is present
   yum_repository:
     name: bintray-thelastpickle-reaper-rpm
@@ -126,9 +136,38 @@
     login_host: "{{ ansible_eth1.ipv4.address }}"
     name: reaper_db
     state: present
-    data_centres:
-      datacenter1: 2
+    replication_factor: 2
   run_once: yes
+
+- name: Copy reaper_schema.cql to host
+  copy:
+    src: "{{ item }}"
+    dest: /home/vagrant
+  with_glob:
+    - files/cql7*.cql
+  when: play_hosts.index(inventory_hostname) == 0
+
+- name: Run reaper schema creation script TODO - Update to use new script
+  shell: cqlsh -k reaper_db -u {{ cassandra_admin_user }} -p {{ cassandra_admin_user_pwd }} -f /home/vagrant/reaper_schema.cql && touch /home/vagrant/reaper_schema.cql.success
+  args:
+    creates:  /home/vagrant/reaper_schema.cql.success
+  environment:
+    CQLSH_HOST: "{{ ansible_eth1.ipv4.address }}"
+  when: play_hosts.index(inventory_hostname) == 0
+
+- name: Copy schema_migration_data.csv to host
+  copy:
+    src: schema_migration_data.csv
+    dest: /home/vagrant/schema_migration_data.csv
+  when: play_hosts.index(inventory_hostname) == 0
+
+- name: Import data into schema_migration table
+  shell: cqlsh -k reaper_db -u {{ cassandra_admin_user }} -p {{ cassandra_admin_user_pwd }} --execute "COPY schema_migration FROM '/home/vagrant/schema_migration_data.csv'" && touch /home/vagrant/schema_migration_data.csv.success
+  args:
+    creates: /home/vagrant/schema_migration_data.csv.success
+  environment:
+    CQLSH_HOST: "{{ ansible_eth1.ipv4.address }}"
+  when: play_hosts.index(inventory_hostname) == 0
 
 - name: Run reaper user script
   shell: cqlsh -u {{ cassandra_admin_user }} -p {{ cassandra_admin_user_pwd }} -f /home/vagrant/create_reaper_user.cql && rm /home/vagrant/create_reaper_user.cql && touch /home/vagrant/cass_reaper.success
@@ -136,7 +175,7 @@
     creates: /home/vagrant/cass_reaper.success
   environment:
     CQLSH_HOST: "{{ ansible_eth1.ipv4.address }}"
-  run_once: yes
+  when: play_hosts.index(inventory_hostname) == 0
 
 - name: Ensure Reaper repo is available
   yum_repository:
@@ -152,11 +191,18 @@
     name: reaper
     state: installed
 
-- name:
+- name: Remove st memory
   lineinfile:
     path: /etc/cassandra-reaper/cassandra-reaper.yaml
     line: "storageType: memory"
     state: absent
+
+- name: Ensure datetime is in log file
+  lineinfile:
+    path: /etc/cassandra-reaper/cassandra-reaper.yaml
+    regexp: '^      logFormat:.*'
+    insertafter: '.*type: file.*'
+    line: '      logFormat: "%-6level [%d] [%t] %logger{5} - %msg %n"'
 
 - name:
   blockinfile:
@@ -175,8 +221,54 @@
           username: {{ cassandra_reaper_user }}
           password: {{ cassandra_reaper_user_pwd }}
 
-- name: Ensure cassandra-reaper is configured and running
+- name: Start reaper on the first server only
   service:
     name: cassandra-reaper
     state: started
     enabled: yes
+  register: first_start
+  when: play_hosts.index(inventory_hostname) == 0
+
+- name: Wait for schema to sync between nodes on first start
+  wait_for:
+    path: /var/log/messages
+    search_regex: "Migration of repair_unit and repair_schedule tables completed"
+  when:
+    - play_hosts.index(inventory_hostname) == 0
+    - first_start.changed == True
+
+- pause:
+    seconds: 10
+  when: first_start.changed == True
+
+- name:  Start reaper on the remaining servers
+  service:
+    name: cassandra-reaper
+    state: started
+    enabled: yes
+  when: play_hosts.index(inventory_hostname) > 0
+
+- name: Ensure Cassandra Reaper always starts after C*
+  lineinfile:
+    path: /etc/systemd/system/multi-user.target.wants/cassandra-reaper.service
+    regexp: '^After=remote-fs.target syslog.socket$'
+    line: 'After=remote-fs.target syslog.socket cassandra.service'
+  register: systemd_reload
+
+- name: Delay start of Cassandra Reaper
+  lineinfile:
+    path: /etc/systemd/system/multi-user.target.wants/cassandra-reaper.service
+    line: 'Type=idle'
+    insertafter: '^ExecStart*'
+  register: systemd_type_reload
+
+- name: just force systemd to reread configs
+  systemd:
+    daemon_reload: yes
+  when: systemd_reload.changed == True or systemd_type_reload.changed == True
+
+- name: Restart reaper
+  service:
+    name: cassandra-reaper
+    state: restarted
+  when: systemd_reload.changed == True
