@@ -188,7 +188,7 @@
 
 - name: Ensure reaper is installed
   yum:
-    name: reaper
+    name: "{{ reaper_package }}"
     state: installed
 
 - name: Remove st memory

@@ -9,3 +9,4 @@
   cassandra_default_user_pwd: 'SomeRandomtextBlahBlah'
   cassandra_reaper_user: reaper
   cassandra_reaper_user_pwd: BigSecretPassword
+  reaper_package: reaper-1.4.4-1.x86_64
