@@ -138,22 +138,46 @@
     state: present
     replication_factor: 2
   run_once: yes
+  ignore_errors: yes # TEMP
 
-- name: Copy reaper_schema.cql to host
+- name: Ensure directory for schema cql files exists
+  file:
+    path: /home/vagrant/cql
+    state: directory
+  become: no
+
+- name: Copy reaper_schema cql files to host
   copy:
     src: "{{ item }}"
-    dest: /home/vagrant
-  with_glob:
-    - files/cql7*.cql
+    dest: /home/vagrant/cql
+  become: no
+  with_fileglob: files/cql/*.cql
   when: play_hosts.index(inventory_hostname) == 0
 
-- name: Run reaper schema creation script TODO - Update to use new script
-  shell: cqlsh -k reaper_db -u {{ cassandra_admin_user }} -p {{ cassandra_admin_user_pwd }} -f /home/vagrant/reaper_schema.cql && touch /home/vagrant/reaper_schema.cql.success
+- name: Get list of cql files in order
+  find:
+    paths: /home/vagrant/cql
+    patterns: '*.cql'
+  register: schema_files
+
+- name: Sort filename into correct order
+  set_fact:
+    schema_files: "{{ schema_files.files | sort(attribute='path') }}"
+
+- name: Run reaper schema creation scripts
+  shell: cqlsh -k reaper_db -u {{ cassandra_admin_user }} -p {{ cassandra_admin_user_pwd }} -f {{ item.path }} && touch {{ item.path }}.success
   args:
-    creates:  /home/vagrant/reaper_schema.cql.success
+    creates:  /home/vagrant/cql/020_rc_added_schema_migration.cql.success
   environment:
     CQLSH_HOST: "{{ ansible_eth1.ipv4.address }}"
   when: play_hosts.index(inventory_hostname) == 0
+  with_items:
+    - "{{ schema_files }}"
+  loop_control:
+    pause: 5
+
+- pause:
+    seconds: 5
 
 - name: Copy schema_migration_data.csv to host
   copy:
@@ -161,8 +185,16 @@
     dest: /home/vagrant/schema_migration_data.csv
   when: play_hosts.index(inventory_hostname) == 0
 
+- shell: cqlsh -k reaper_db -u {{ cassandra_admin_user }} -p {{ cassandra_admin_user_pwd }} --execute "DESC TABLES"
+  register: desc_keyspaces
+  environment:
+    CQLSH_HOST: "{{ ansible_eth1.ipv4.address }}"
+
+- debug:
+    var: desc_keyspaces
+
 - name: Import data into schema_migration table
-  shell: cqlsh -k reaper_db -u {{ cassandra_admin_user }} -p {{ cassandra_admin_user_pwd }} --execute "COPY schema_migration FROM '/home/vagrant/schema_migration_data.csv'" && touch /home/vagrant/schema_migration_data.csv.success
+  shell: cqlsh -k reaper_db -u {{ cassandra_admin_user }} -p {{ cassandra_admin_user_pwd }} --execute "COPY reaper_db.schema_migration (applied_successful, version, executed_at, script, script_name) FROM '/home/vagrant/schema_migration_data.csv'" && touch /home/vagrant/schema_migration_data.csv.success
   args:
     creates: /home/vagrant/schema_migration_data.csv.success
   environment:
